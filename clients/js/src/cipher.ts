@@ -216,7 +216,7 @@ export class X25519DeoxysII extends Cipher {
   public override readonly epoch: number | undefined;
 
   private cipher: deoxysii.AEAD;
-  private key: Uint8Array; // Stored for curious users.
+  public secretKey: Uint8Array; // Stored for curious users.
 
   /** Creates a new cipher using an ephemeral keypair stored in memory. */
   static ephemeral(peerPublicKey: BytesLike, epoch?: number): X25519DeoxysII {
@@ -254,8 +254,8 @@ export class X25519DeoxysII extends Cipher {
       .update(naclScalarMult(keypair.secretKey, peerPublicKey))
       .digest().buffer;
 
-    this.key = new Uint8Array(keyBytes);
-    this.cipher = new deoxysii.AEAD(new Uint8Array(this.key)); // deoxysii owns the input
+    this.secretKey = new Uint8Array(keyBytes);
+    this.cipher = new deoxysii.AEAD(new Uint8Array(this.secretKey)); // deoxysii owns the input
   }
 
   public encrypt(

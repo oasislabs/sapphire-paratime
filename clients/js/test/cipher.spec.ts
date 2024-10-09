@@ -18,7 +18,7 @@ describe('X25519DeoxysII', () => {
     expect(hexlify(cipher.publicKey)).toEqual(
       '0x3046db3fa70ce605457dc47c48837ebd8bd0a26abfde5994d033e1ced68e2576',
     );
-    expect(hexlify(cipher['key'])).toEqual(
+    expect(hexlify(cipher['secretKey'])).toEqual(
       '0xe69ac21066a8c2284e8fdc690e579af4513547b9b31dd144792c1904b45cf586',
     );
 
