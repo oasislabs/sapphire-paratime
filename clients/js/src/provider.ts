@@ -44,7 +44,7 @@ export function isLegacyProvider<T extends object>(
 
 export interface SapphireWrapOptions {
   fetcher: KeyFetcher;
-  enableSapphireSnap: boolean | undefined
+  enableSapphireSnap: boolean | undefined;
 }
 
 export function fillOptions(
@@ -139,29 +139,30 @@ interface SnapInfoT {
 
 const SAPPHIRE_SNAP_PNPM_ID = 'npm:@oasisprotocol/sapphire-snap';
 
-async function detectSapphireSnap (provider: EIP2696_EthereumProvider) {
+async function detectSapphireSnap(provider: EIP2696_EthereumProvider) {
   try {
-    const installedSnaps = await provider.request({method: 'wallet_getSnaps'}) as Record<string,SnapInfoT>;
-    for( const snap of Object.values(installedSnaps) ) {
-      if( snap.id == SAPPHIRE_SNAP_PNPM_ID ) {
+    const installedSnaps = (await provider.request({
+      method: 'wallet_getSnaps',
+    })) as Record<string, SnapInfoT>;
+    for (const snap of Object.values(installedSnaps)) {
+      if (snap.id === SAPPHIRE_SNAP_PNPM_ID) {
         return snap.id;
       }
     }
-  }
-  catch( e:any ) {
+  } catch (e: any) {
     return undefined;
   }
 }
 
 async function notifySapphireSnap(
-  snapId:string,
-  cipher:Cipher,
+  snapId: string,
+  cipher: Cipher,
   transactionData: BytesLike,
-  options:SapphireWrapOptions,
-  provider: EIP2696_EthereumProvider
+  options: SapphireWrapOptions,
+  provider: EIP2696_EthereumProvider,
 ) {
   const secretKey = (cipher as any).secretKey as Uint8Array | undefined;
-  if( secretKey ) {
+  if (secretKey) {
     const peerPublicKey = await options.fetcher.fetch(provider);
     await provider.request({
       method: 'wallet_invokeSnap',
@@ -173,10 +174,10 @@ async function notifySapphireSnap(
             id: transactionData,
             ephemeralSecretKey: hexlify(secretKey),
             peerPublicKey: peerPublicKey.key,
-            peerPublicKeyEpoch: peerPublicKey.epoch
-          }
-        }
-      }
+            peerPublicKeyEpoch: peerPublicKey.epoch,
+          },
+        },
+      },
     });
   }
 }
@@ -215,13 +216,15 @@ export async function makeSapphireRequestFn(
 
   const filled_options = fillOptions(options);
 
-  const snapId = filled_options.enableSapphireSnap ? await detectSapphireSnap(provider) : undefined;
+  const snapId = filled_options.enableSapphireSnap
+    ? await detectSapphireSnap(provider)
+    : undefined;
 
   const f = async (args: EIP1193_RequestArguments) => {
     const cipher = await filled_options.fetcher.cipher(provider);
     const { method, params } = args;
 
-    let transactionData : BytesLike | undefined = undefined;
+    let transactionData: BytesLike | undefined = undefined;
     // Encrypt requests which can be encrypted
     if (
       params &&
@@ -237,9 +240,15 @@ export async function makeSapphireRequestFn(
       params: params ?? [],
     });
 
-    if( snapId !== undefined && transactionData !== undefined ) {
+    if (snapId !== undefined && transactionData !== undefined) {
       // Run in background so as to not delay results
-      notifySapphireSnap(snapId, cipher, transactionData, filled_options, provider);
+      notifySapphireSnap(
+        snapId,
+        cipher,
+        transactionData,
+        filled_options,
+        provider,
+      );
     }
 
     // Decrypt responses which return encrypted data
