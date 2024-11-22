@@ -7,11 +7,12 @@ import {SignatureRSV} from "../EthereumUtils.sol";
  * @title Interface for authenticatable contracts
  * @notice This is the interface for universal authentication mechanism (e.g.
  * SIWE):
- * 1. The user-facing app calls login() to generate the bearer token on-chain.
- * 2. Any smart contract method that requires authentication accept this token
- *    as an argument. Then, it passes the token to authMsgSender() to verify it
- *    and obtain the **authenticated** user address. This address can then serve
- *    as a user ID for authorization.
+ * 1. The user-facing app calls `login()` which generates the bearer token
+ *    on-chain.
+ * 2. Any smart contract method that requires authentication takes this token
+ *    as an argument. It passes this token to `authMsgSender()` to verify it
+ *    and obtain the **authenticated** user address. This address can then
+ *    serve as a user ID for authorization.
  */
 abstract contract A13e {
     /// A mapping of revoked bearers. Access it directly or use the checkRevokedBearer modifier.
@@ -23,7 +24,7 @@ abstract contract A13e {
     /**
      * @notice Reverts if the given bearer was revoked
      */
-    modifier checkRevokedBearer(bytes calldata bearer) {
+    modifier checkRevokedBearer(bytes memory bearer) {
         if (_revokedBearers[keccak256(bearer)]) {
             revert RevokedBearer();
         }
@@ -43,7 +44,7 @@ abstract contract A13e {
     /**
      * @notice Validate the bearer token and return authenticated msg.sender.
      */
-    function authMsgSender(bytes calldata bearer)
+    function authMsgSender(bytes memory bearer)
         internal
         view
         virtual

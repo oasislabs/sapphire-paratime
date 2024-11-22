@@ -16,7 +16,7 @@ struct Bearer {
 /**
  * @title Base contract for SIWE-based authentication
  * @notice Inherit this contract, if you wish to enable SIWE-based
- * authentication for your contract methods that require authenticated calls.
+ * authentication for your contract methods that require authentication.
  * The smart contract needs to be bound to a domain (passed in constructor).
  *
  * #### Example
@@ -24,9 +24,10 @@ struct Bearer {
  * ```solidity
  * contract MyContract is SiweAuth {
  *   address private _owner;
+ *   string private _message;
  *
  *   modifier onlyOwner(bytes calldata bearer) {
- *     if (authMsgSender(bearer) != _owner) {
+ *     if (msg.sender != _owner && authMsgSender(bearer) != _owner) {
  *       revert("not allowed");
  *     }
  *     _;
@@ -37,7 +38,11 @@ struct Bearer {
  *   }
  *
  *   function getSecretMessage(bytes calldata bearer) external view onlyOwner(bearer) returns (string memory) {
- *     return "Very secret message";
+ *     return _message;
+ *   }
+ *
+ *   function setSecretMessage(string calldata message) external onlyOwner("") {
+ *     _message = message;
  *   }
  * }
  * ```
@@ -144,13 +149,16 @@ contract SiweAuth is A13e {
         return _domain;
     }
 
-    function authMsgSender(bytes calldata bearer)
+    function authMsgSender(bytes memory bearer)
         internal
         view
         override
         checkRevokedBearer(bearer)
         returns (address)
     {
+        if (bearer.length == 0) {
+            return address(0);
+        }
         bytes memory bearerEncoded = Sapphire.decrypt(
             _bearerEncKey,
             0,
