@@ -11,12 +11,12 @@ contract SiweAuthTests is SiweAuth {
         _owner = msg.sender;
     }
 
-    function testVerySecretMessage(bytes calldata bearer)
+    function testVerySecretMessage(bytes calldata token)
         external
         view
         returns (string memory)
     {
-        if (authMsgSender(bearer) != _owner) {
+        if (authMsgSender(token) != _owner) {
             revert("not allowed");
         }
         return "Very secret message";
@@ -30,16 +30,16 @@ contract SiweAuthTests is SiweAuth {
         return this.login(message, sig);
     }
 
-    function testAuthMsgSender(bytes calldata bearer)
+    function testAuthMsgSender(bytes calldata token)
         external
         view
         returns (address)
     {
-        return authMsgSender(bearer);
+        return authMsgSender(token);
     }
 
-    function testRevokeBearer(bytes32 bearer) external {
-        return revokeBearer(bearer);
+    function testRevokeAuthToken(bytes32 token) external {
+        return revokeAuthToken(token);
     }
 
     function doNothing() external { // solhint-disable-line

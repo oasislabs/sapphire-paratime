@@ -7,7 +7,7 @@ import {SignatureRSV, A13e} from "./A13e.sol";
 import {ParsedSiweMessage, SiweParser} from "../SiweParser.sol";
 import {Sapphire} from "../Sapphire.sol";
 
-struct Bearer {
+struct AuthToken {
     string domain; // [ scheme "://" ] domain.
     address userAddr;
     uint256 validUntil; // in Unix timestamp.
@@ -15,8 +15,8 @@ struct Bearer {
 
 /**
  * @title Base contract for SIWE-based authentication
- * @notice Inherit this contract, if you wish to enable SIWE-based
- * authentication for your contract methods that require authentication.
+ * @notice Inherit this contract if you wish to enable SIWE-based
+ * authentication in your contract functions that require authentication.
  * The smart contract needs to be bound to a domain (passed in constructor).
  *
  * #### Example
@@ -26,8 +26,8 @@ struct Bearer {
  *   address private _owner;
  *   string private _message;
  *
- *   modifier onlyOwner(bytes calldata bearer) {
- *     if (msg.sender != _owner && authMsgSender(bearer) != _owner) {
+ *   modifier onlyOwner(bytes calldata token) {
+ *     if (msg.sender != _owner && authMsgSender(token) != _owner) {
  *       revert("not allowed");
  *     }
  *     _;
@@ -37,7 +37,7 @@ struct Bearer {
  *     _owner = msg.sender;
  *   }
  *
- *   function getSecretMessage(bytes calldata bearer) external view onlyOwner(bearer) returns (string memory) {
+ *   function getSecretMessage(bytes calldata token) external view onlyOwner(token) returns (string memory) {
  *     return _message;
  *   }
  *
@@ -50,9 +50,9 @@ struct Bearer {
 contract SiweAuth is A13e {
     /// Domain which the dApp is associated with
     string private _domain;
-    /// Encryption key which the bearer tokens are encrypted with
-    bytes32 private _bearerEncKey;
-    /// Default bearer token validity, if no expiration-time provided
+    /// Encryption key which the authentication tokens are encrypted with
+    bytes32 private _authTokenEncKey;
+    /// Default authentication token validity, if no expiration-time provided
     uint256 private constant DEFAULT_VALIDITY = 24 hours;
 
     /// Chain ID in the SIWE message does not match the actual chain ID
@@ -63,7 +63,7 @@ contract SiweAuth is A13e {
     error AddressMismatch();
     /// The Not before value in the SIWE message is still in the future
     error NotBeforeInFuture();
-    /// The bearer token validity or the Expires value in the SIWE message is in the past
+    /// The authentication token validity or the Expires value in the SIWE message is in the past
     error Expired();
 
     /**
@@ -71,7 +71,7 @@ contract SiweAuth is A13e {
      * runs on the specified domain.
      */
     constructor(string memory inDomain) {
-        _bearerEncKey = bytes32(Sapphire.randomBytes(32, ""));
+        _authTokenEncKey = bytes32(Sapphire.randomBytes(32, ""));
         _domain = inDomain;
     }
 
@@ -81,7 +81,7 @@ contract SiweAuth is A13e {
         override
         returns (bytes memory)
     {
-        Bearer memory b;
+        AuthToken memory b;
 
         // Derive the user's address from the signature.
         bytes memory eip191msg = abi.encodePacked(
@@ -134,7 +134,7 @@ contract SiweAuth is A13e {
         }
 
         bytes memory encB = Sapphire.encrypt(
-            _bearerEncKey,
+            _authTokenEncKey,
             0,
             abi.encode(b),
             ""
@@ -149,23 +149,23 @@ contract SiweAuth is A13e {
         return _domain;
     }
 
-    function authMsgSender(bytes memory bearer)
+    function authMsgSender(bytes memory token)
         internal
         view
         override
-        checkRevokedBearer(bearer)
+        checkRevokedAuthToken(token)
         returns (address)
     {
-        if (bearer.length == 0) {
+        if (token.length == 0) {
             return address(0);
         }
-        bytes memory bearerEncoded = Sapphire.decrypt(
-            _bearerEncKey,
+        bytes memory authTokenEncoded = Sapphire.decrypt(
+            _authTokenEncKey,
             0,
-            bearer,
+            token,
             ""
         );
-        Bearer memory b = abi.decode(bearerEncoded, (Bearer));
+        AuthToken memory b = abi.decode(authTokenEncoded, (AuthToken));
 
         if (keccak256(bytes(b.domain)) != keccak256(bytes(_domain))) {
             revert DomainMismatch();
