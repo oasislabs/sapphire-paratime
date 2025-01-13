@@ -16,6 +16,7 @@ import type {
 	EIP1193_RequestArguments,
 	EIP1193_RequestFn,
 	EIP2696_EthereumProvider,
+	SapphireWrapConfig,
 	SapphireWrapOptions,
 } from "@oasisprotocol/sapphire-paratime";
 
@@ -101,7 +102,7 @@ function hookEthersSend<
 
 export function wrapEthersSigner<P extends Signer>(
 	upstream: P,
-	options?: SapphireWrapOptions,
+	options?: SapphireWrapConfig,
 ): P & EIP2696_EthereumProvider {
 	if (isWrappedSigner(upstream)) {
 		return upstream;
@@ -175,7 +176,7 @@ export class ContractRunnerHasNoProviderError extends Error {}
 
 export function wrapEthersProvider<P extends Provider>(
 	provider: P,
-	options?: SapphireWrapOptions,
+	options?: SapphireWrapConfig,
 ): P & EIP2696_EthereumProvider {
 	// Already wrapped, so don't wrap it again.
 	if (isWrappedProvider(provider)) {

@@ -44,19 +44,22 @@ export function isLegacyProvider<T extends object>(
 
 export interface SapphireWrapOptions {
   fetcher: KeyFetcher;
-  enableSapphireSnap: boolean | undefined;
+  enableSapphireSnap?: boolean;
 }
 
-export function fillOptions(
-  options: SapphireWrapOptions | undefined,
-): SapphireWrapOptions {
+export interface SapphireWrapConfig
+  extends Omit<SapphireWrapOptions, 'fetcher'> {
+  fetcher?: KeyFetcher;
+}
+
+export function fillOptions(options: SapphireWrapConfig | undefined) {
   if (!options) {
     options = {} as SapphireWrapOptions;
   }
   if (!options.fetcher) {
     options.fetcher = new KeyFetcher();
   }
-  return options;
+  return options as SapphireWrapOptions;
 }
 
 // -----------------------------------------------------------------------------
@@ -84,7 +87,7 @@ export function isWrappedEthereumProvider<P extends EIP2696_EthereumProvider>(
  */
 export async function wrapEthereumProvider<P extends EIP2696_EthereumProvider>(
   upstream: P,
-  options?: SapphireWrapOptions,
+  options?: SapphireWrapConfig,
 ): Promise<P> {
   if (isWrappedEthereumProvider(upstream)) {
     return upstream;
