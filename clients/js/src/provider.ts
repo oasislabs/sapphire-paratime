@@ -176,7 +176,7 @@ async function notifySapphireSnap(
           params: {
             id: transactionData,
             ephemeralSecretKey: hexlify(secretKey),
-            peerPublicKey: peerPublicKey.key,
+            peerPublicKey: hexlify(peerPublicKey.key),
             peerPublicKeyEpoch: peerPublicKey.epoch,
           },
         },
