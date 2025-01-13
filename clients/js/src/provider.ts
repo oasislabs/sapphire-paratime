@@ -142,7 +142,7 @@ interface SnapInfoT {
 
 const SAPPHIRE_SNAP_PNPM_ID = 'npm:@oasisprotocol/sapphire-snap';
 
-async function detectSapphireSnap(provider: EIP2696_EthereumProvider) {
+export async function detectSapphireSnap(provider: EIP2696_EthereumProvider) {
   try {
     const installedSnaps = (await provider.request({
       method: 'wallet_getSnaps',
@@ -157,7 +157,7 @@ async function detectSapphireSnap(provider: EIP2696_EthereumProvider) {
   }
 }
 
-async function notifySapphireSnap(
+export async function notifySapphireSnap(
   snapId: string,
   cipher: Cipher,
   transactionData: BytesLike,
