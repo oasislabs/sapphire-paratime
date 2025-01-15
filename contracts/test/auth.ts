@@ -123,11 +123,11 @@ describe('Auth', function () {
       accounts.path + '/0',
     );
     const siweStr = await siweMsg('localhost', 0);
-    const bearer = await siweAuthTests.testLogin(
+    const token = await siweAuthTests.testLogin(
       siweStr,
       await erc191sign(siweStr, account),
     );
-    expect(await siweAuthTests.testVerySecretMessage(bearer)).to.be.equal(
+    expect(await siweAuthTests.testVerySecretMessage(token)).to.be.equal(
       'Very secret message',
     );
 
@@ -137,26 +137,26 @@ describe('Auth', function () {
       accounts.path + '/1',
     );
     const siweStr2 = await siweMsg('localhost', 1);
-    const bearer2 = await siweAuthTests.testLogin(
+    const token2 = await siweAuthTests.testLogin(
       siweStr2,
       await erc191sign(siweStr2, acc2),
     );
-    await expect(siweAuthTests.testVerySecretMessage(bearer2)).to.be.reverted;
+    await expect(siweAuthTests.testVerySecretMessage(token2)).to.be.reverted;
 
-    // Same user, hijacked bearer from another contract/domain.
+    // Same user, hijacked token from another contract/domain.
     const siweAuthTests2 = await deploy('localhost2');
     const siweStr3 = await siweMsg('localhost2', 0);
-    const bearer3 = await siweAuthTests2.testLogin(
+    const token3 = await siweAuthTests2.testLogin(
       siweStr3,
       await erc191sign(siweStr3, account),
     );
-    await expect(siweAuthTests.testVerySecretMessage(bearer3)).to.be.reverted;
+    await expect(siweAuthTests.testVerySecretMessage(token3)).to.be.reverted;
 
-    // Expired bearer
+    // Expired token
     // on-chain block timestamps are integers representing seconds
     const expiration = new Date(Date.now() + 1000);
     const siweStr4 = await siweMsg('localhost', 0, expiration);
-    const bearer4 = await siweAuthTests.testLogin(
+    const token4 = await siweAuthTests.testLogin(
       siweStr4,
       await erc191sign(siweStr4, account),
     );
@@ -169,14 +169,14 @@ describe('Auth', function () {
         }
       });
     });
-    await expect(siweAuthTests.testVerySecretMessage(bearer4)).to.be.reverted;
+    await expect(siweAuthTests.testVerySecretMessage(token4)).to.be.reverted;
 
-    // Revoke bearer.
-    const bearer5 = await siweAuthTests.testLogin(
+    // Revoke token.
+    const token5 = await siweAuthTests.testLogin(
       siweStr,
       await erc191sign(siweStr, account),
     );
-    await siweAuthTests.testRevokeBearer(ethers.keccak256(bearer5));
-    await expect(siweAuthTests.testVerySecretMessage(bearer5)).to.be.reverted;
+    await siweAuthTests.testRevokeAuthToken(ethers.keccak256(token5));
+    await expect(siweAuthTests.testVerySecretMessage(token5)).to.be.reverted;
   });
 });

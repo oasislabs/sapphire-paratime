@@ -2,67 +2,79 @@
 description: Authenticate users with your confidential contracts
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # View-Call Authentication
 
-User impersonation on Ethereum and other "Transparent EVMs" isn't a problem
-because **everybody** can see **all** data however the Sapphire confidential
+User impersonation on Ethereum and other "transparent EVMs" isn't a problem
+because **everybody** can see **all** data. However, the Sapphire confidential
 EVM prevents contracts from revealing confidential information to the wrong
-party (account or contract) - for this reason we cannot allow arbitrary
+party (account or contract)—for this reason we cannot allow arbitrary
 impersonation of any `msg.sender`.
 
-In Sapphire, there are four types of contract calls:
+In Sapphire, you need to consider the following types of contract calls:
 
- 1. Contract to contract calls (also known as *internal calls*)
- 2. Unauthenticted view calls (queries using `eth_call`)
- 3. Authenticated view calls (signed queries)
- 4. Transactions (authenticated by signature)
+1. **Contract to contract calls** (also known as *internal calls*)
+  
+    `msg.sender` is set to the address corresponding to the caller function. If
+    a contract calls another contract in a way which could reveal sensitive
+    information, the calling contract must implement access control or
+    authentication.
 
-Intra-contract calls always set `msg.sender` appropriately, if a contract calls
-another contract in a way which could reveal sensitive information, the calling
-contract must implement access control or authentication.
+2. **Unauthenticted view calls** (queries using `eth_call`)
 
-By default all `eth_call` queries used to invoke contract functions have the
-`msg.sender` parameter set to `address(0x0)`. In contrast, authenticated calls are
-signed by a keypair and will have the `msg.sender` parameter correctly initialized
-(more on that later). Also, when a transaction is
-submitted it is signed by a keypair (thus costs gas and can make state updates)
-and the `msg.sender` will be set to the signing account.
+    `eth_call` queries used to invoke contract functions will always have the
+    `msg.sender` parameter set to `address(0x0)` on Sapphire. This is regardless
+    of any `from` overrides passed on the client side for simulating the query.
+   
+   :::note
 
-## Sapphire Wrapper
+   Calldata end-to-end encryption has nothing to do with authentication.
+   Although the calls may be unauthenticated they can still be encrypted, and
+   the other way around!
 
-The [@oasisprotocol/sapphire-paratime][sp-npm] Ethereum provider wrapper
-`sapphire.wrap` function will **automatically end-to-end encrypt calldata** when
-interacting with contracts on Sapphire, this is an easy way to ensure the
-calldata of your dApp transactions remain confidential - although the `from`,
-`to`, and `gasprice` parameters are not encrypted.
+   :::
 
-[sp-npm]: https://www.npmjs.com/package/@oasisprotocol/sapphire-paratime
+3. **Authenticated view calls** (via SIWE token)
 
-:::tip Unauthenticated calls and Encryption
+    Developer authenticates the view call explicitly by deriving a message
+    sender from the SIWE token. This token is provided as a separate parameter
+    to the contract function. The derived address can then be used for
+    authentication in place of `msg.sender`. Otherwise, such view call behaves
+    the same way as the unauthenticated view calls above and built-in
+    `msg.sender` is `address(0x0)`. This approach is most appropriate for 
+    frontend dApps.
 
-Although the calls may be unauthenticated, they can still be encrypted!
+4. **Authenticated view calls** (via signed queries)
 
-:::
+    [EIP-712] defines a format for signing view calls with the keypair of your
+    Ethereum account. Sapphire will validate such signatures and automatically
+    set the `msg.sender` parameter in your contract to the address of the
+    signing account. This method is mostly appropriate for backend services,
+    since the frontend would require user interaction each time.
 
-However, if the Sapphire wrapper has been attached to a signer then subsequent
-view calls via `eth_call` will request that the user sign them (e.g. a
-MetaMask popup), these are called **signed queries** meaning `msg.sender` will be
-set to the signing account and can be used for authentication or to implement
-access control. This may add friction to the end-user experience and can result
-in frequent pop-ups requesting they sign queries which wouldn't normally require
-any interaction on Transparent EVMs.
+5. **Transactions** (authenticated by signature)
 
-Let's see how Sapphire interprets different contract calls. Suppose the
-following solidity code:
+    When a transaction is submitted it is signed by a keypair (thus costs gas
+    and can make state updates) and the `msg.sender` will be set to the address of
+    the signing account.
+
+[EIP-712]: https://eips.ethereum.org/EIPS/eip-712
+
+## How Sapphire Executes Contract Calls
+
+Let's see how Sapphire executes contract calls for each call variant presented
+above. Consider the following Solidity code:
 
 ```solidity
 contract Example {
-    address owner;
+    address _owner;
     constructor () {
-        owner = msg.sender;
+        _owner = msg.sender;
     }
-    function isOwner () public view returns (bool) {
-        return msg.sender == owner;
+    function isOwner() public view returns (bool) {
+        return msg.sender == _owner;
     }
 }
 ```
@@ -70,140 +82,279 @@ contract Example {
 In the sample above, assuming we're calling from the same contract or account
 which created the contract, calling `isOwner` will return:
 
- * `false`, for `eth_call`
- * `false`, with `sapphire.wrap` but without an attached signer
- * `true`, with `sapphire.wrap` and an attached signer
- * `true`, if called via the contract which created it
-* `true`, if called via transaction
+1. `true`, if called via the contract which created it
+2. `false`, for unauthenticated `eth_call`
+3. `false`, since the contract has no SIWE implementation
+4. `true`, for signed view call using the wrapped client ([Go][wrapped-go],
+   [Python][wrapped-py]) with signer attached
+5. `true`, if called via transaction
 
-## Caching Signed Queries
+Now that we've covered basics, let's look more closely at the *authenticated
+view calls*. These are crucial for building confidential smart contracts on
+Sapphire.
 
-When using signed queries the blockchain will be queried each time, however
-the Sapphire wrapper will cache signatures for signed queries with the same
-parameters to avoid asking the user to sign the same thing multiple times.
+## Authenticated view calls
 
-Behind the scenes the signed queries use a "leash" to specify validity conditions
-so the query can only be performed within a block and account `nonce` range.
-These parameters are visible in the EIP-712 popup signed by the user. Queries
-with the same parameters will use the same leash.
-
-## Daily Sign-In with EIP-712
-
-One strategy which can be used to reduce the number of transaction signing
-prompts when a user interacts with contracts via a dApp is to use
-[EIP-712][eip-712] to "sign-in" once per day (or per-session), in combination
-with using two wrapped providers:
-
-[eip-712]: https://eips.ethereum.org/EIPS/eip-712
-
- 1. Provider to perform encrypted but unauthenticated view calls
- 2. Another provider to perform encrypted and authenticated transactions (or view calls)
-    - The user will be prompted to sign each action.
-
-The two-provider pattern, in conjunction with a daily EIP-712 sign-in prompt
-ensures all transactions are end-to-end encrypted and the contract can
-authenticate users in view calls without frequent annoying popups.
-
-The code sample below uses an `authenticated` modifier to verify the sign-in:
+Consider this slightly extended version of the contract above. Only the owner is
+allowed to store and retrieve secret message:
 
 ```solidity
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
+contract MessageBox {
+    address private _owner;
+    string private _message;
 
-struct SignatureRSV {
-    bytes32 r;
-    bytes32 s;
-    uint256 v;
-}
-
-contract SignInExample {
-    bytes32 public constant EIP712_DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-    string public constant SIGNIN_TYPE = "SignIn(address user,uint32 time)";
-    bytes32 public constant SIGNIN_TYPEHASH = keccak256(bytes(SIGNIN_TYPE));
-    bytes32 public immutable DOMAIN_SEPARATOR;
-
-    constructor () {
-        DOMAIN_SEPARATOR = keccak256(abi.encode(
-            EIP712_DOMAIN_TYPEHASH,
-            keccak256("SignInExample.SignIn"),
-            keccak256("1"),
-            block.chainid,
-            address(this)
-        ));
-    }
-
-    struct SignIn {
-        address user;
-        uint32 time;
-        SignatureRSV rsv;
-    }
-
-    modifier authenticated(SignIn calldata auth)
-    {
-        // Must be signed within 24 hours ago.
-        require( auth.time > (block.timestamp - (60*60*24)) );
-
-        // Validate EIP-712 sign-in authentication.
-        bytes32 authdataDigest = keccak256(abi.encodePacked(
-            "\x19\x01",
-            DOMAIN_SEPARATOR,
-            keccak256(abi.encode(
-                SIGNIN_TYPEHASH,
-                auth.user,
-                auth.time
-            ))
-        ));
-
-        address recovered_address = ecrecover(
-            authdataDigest, uint8(auth.rsv.v), auth.rsv.r, auth.rsv.s);
-
-        require( auth.user == recovered_address, "Invalid Sign-In" );
-
+    modifier onlyOwner() {
+        if (msg.sender != _owner) {
+            revert("not allowed");
+        }
         _;
     }
+    constructor() {
+        _owner = msg.sender;
+    }
 
-    function authenticatedViewCall(
-        SignIn calldata auth,
-        ... args
-    )
-        external view
-        authenticated(auth)
-        returns (bytes memory output)
-    {
-        // Use `auth.user` instead of `msg.sender`!
+    function getSecretMessage() external view onlyOwner returns (string memory) {
+        return _message;
+    }
+
+    function setSecretMessage(string calldata message) external onlyOwner {
+        _message = message;
     }
 }
 ```
 
-With the above contract code deployed, let's look at the frontend dApp and how
-it can request the user to sign-in using EIP-712. You may wish to add additional
-parameters which are authenticated such as the domain name. The following code
-example uses Ethers:
+### via SIWE token
+
+SIWE stands for "Sign-In with Ethereum" and is formally defined in [EIP-4361].
+The initial use case for SIWE involved using your Ethereum account as a form of
+authentication for off-chain services (providing an alternative to user names
+and passwords). The MetaMask wallet quickly adopted the standard and it became a
+de-facto login mechanism in the Web3 world. An informative pop-up for logging
+into a SIWE-enabled website looks like this:
+
+![MetaMask Log-In confirmation](images/siwe-login.png)
+
+After a user agrees by signing the SIWE login message above, the signature is
+verified by the website backend or by a 3rd party [single sign-on] service. This
+is done only once per session—during login. A successful login generates a token
+that is used for the remainder of the session.
+
+In contrast to transparent EVM chains, **Sapphire simplifies dApp design,
+improves trust, and increases the usability of SIWE messages through extending
+message parsing and verification to on-chain computation**. This feature (unique
+to Sapphire) removes the need to develop and maintain separate dApp backend
+services just for SIWE authentication. Let's take a look at an example
+authentication flow:
+
+![SIWE authentication flow on Sapphire](diagrams/siwe-sapphire-flow.mmd.svg)
+
+Consider the `MessageBox` contract from [above](#authenticated-view-calls), and
+let's extend it with SIWE:
+
+```solidity
+contract MessageBox is SiweAuth {
+  address private _owner;
+  string private _message;
+
+  modifier onlyOwner(bytes memory token) {
+    if (msg.sender != _owner && authMsgSender(token) != _owner) {
+        revert("not allowed");
+    }
+    _;
+  }
+
+  constructor(string memory domain) SiweAuth(domain) {
+    _owner = msg.sender;
+  }
+
+  function getSecretMessage(bytes calldata token) external view onlyOwner(token) returns (string memory) {
+    return _message;
+  }
+
+  function setSecretMessage(string calldata message) external onlyOwner(bytes("")) {
+    _message = message;
+  }
+}
+```
+
+We made the following changes:
+
+1. In the constructor, we need to define the domain name where the dApp frontend
+   will be deployed. This domain is included inside the SIWE log-in message
+   and is verified by the user-facing wallet to make sure they are accessing the
+   contract from a legitimate domain.
+2. The `onlyOwner` modifier is extended with an optional `bytes memory token`
+   parameter and is considered in the case of invalid `msg.sender` value. The
+   same modifier is used for authenticating both SIWE queries and the
+   transactions.
+3. `getSecretMessage` was extended with the `bytes memory token` session token.
+
+On the client side, the code running inside a browser needs to make sure that
+the session token for making authenticated calls is valid. If not, the browser
+requests a wallet to sign a log-in message and fetch a fresh session token.
 
 ```typescript
-const time = new Date().getTime();
-const user = await eth.signer.getAddress();
+import {SiweMessage} from 'siwe';
 
-// Ask user to "Sign-In" every 24 hours.
-const signature = await eth.signer.signTypedData({
-    name: "SignInExample.SignIn",
-    version: "1",
-    chainId: import.meta.env.CHAINID,
-    verifyingContract: await contract.getAddress()
-}, {
-    SignIn: [
-        { name: 'user', type: "address" },
-        { name: 'time', type: 'uint32' },
-    ]
-}, {
-    user,
-    time: time
-});
-const rsv = ethers.Signature.from(signature);
-const auth = {user, time, rsv};
-// The `auth` variable can then be cached.
+let token = '';
 
-// Then in the future, authenticated view calls can be performed by
-// passing auth without further user interaction authenticated data.
-await contract.authenticatedViewCall(auth, ...args);
+async function getSecretMessage(): Promise<Message> {
+  const messageBox = await hre.ethers.getContractAt('MessageBox', '0x5FbDB2315678afecb367f032d93F642f64180aa3');
+
+  if (token == '') { // Stored in browser session.
+    const domain = await messageBox.domain();
+    const siweMsg = new SiweMessage({
+      domain,
+      address: addr, // User's selected account address.
+      uri: `http://${domain}`,
+      version: "1",
+      chainId: 0x5afe, // Sapphire Testnet
+    }).toMessage();
+    const sig = Signature.from((await window.ethereum.getSigner(addr)).signMessage(siweMsg));
+    token = await messageBox.login(siweMsg, sig);
+  }
+
+  return messageBox.getSecretMessage(token);
+}
 ```
+
+:::info Example: Starter project
+
+To see a running example of the TypeScript SIWE code including the Hardhat
+tests, Node.js and the browser, check out the official Oasis [demo-starter]
+project.
+
+:::
+
+:::tip Sapphire TypeScript wrapper?
+
+While the [Sapphire TypeScript wrapper][sp-npm] offers a convenient end-to-end
+encryption for the contract calls out of the box, it is not mandatory for SIWE.
+
+:::
+
+[demo-starter]: https://github.com/oasisprotocol/demo-starter/tree/matevz/sapphire-paratime-2.0
+[EIP-4361]: https://eips.ethereum.org/EIPS/eip-4361
+[single sign-on]: https://en.wikipedia.org/wiki/Single_sign-on
+[sp-npm]: https://www.npmjs.com/package/@oasisprotocol/sapphire-paratime
+
+### via signed queries
+
+The [EIP-712] proposal defines a method to show data to the user in a structured
+fashion so they can verify it and sign it. On the frontend, apps signing a view
+call would require user interaction each time—sometimes even multiple times per
+page—which is bad UX that frustrates users. Backend services on the other hand
+can have direct access to an Ethereum wallet without needing user interaction.
+This is possible because these services do not access unspecified websites, and
+only execute trusted code.
+
+The Sapphire wrappers for [Go][sp-go] and [Python][sp-py] will make sure to
+**automatically sign any view calls** you make to a contract running on Sapphire
+using the proposed [EIP-712] method. Suppose we want to store the private key of
+an account used to sign the view calls inside a `PRIVATE_KEY` environment
+variable. The following snippets demonstrate how to trigger signed queries
+without any changes to the original `MessageBox` contract from
+[above](#authenticated-view-calls).
+
+<Tabs>
+    <TabItem value="Go">
+    Wrap the existing Ethereum client by calling the
+    [`WrapClient()`][wrapped-go] helper and provide the signing logic. Then,
+    all subsequent view calls will be signed. For example:
+
+```go
+import (
+    "context"
+    "crypto/ecdsa"
+
+    "github.com/ethereum/go-ethereum/accounts/abi/bind"
+    "github.com/ethereum/go-ethereum/common"
+    "github.com/ethereum/go-ethereum/crypto"
+    "github.com/ethereum/go-ethereum/ethclient"
+    
+    sapphire "github.com/oasisprotocol/sapphire-paratime/clients/go"
+
+    messageBox "demo-starter/contracts/message-box"
+)
+
+func GetC10lMessage() (string, error) {
+    client, err = ethclient.Dial("https://testnet.sapphire.oasis.io")
+    if err != nil {
+        return "", err
+    }
+	
+    sk, err = crypto.HexToECDSA(os.Getenv("PRIVATE_KEY"))
+    addr := crypto.PubkeyToAddress(*sk.Public().(*ecdsa.PublicKey))
+
+    wrappedClient, err := sapphire.WrapClient(c.Client, func(digest [32]byte) ([]byte, error) {
+        return crypto.Sign(digest[:], sk)
+    })
+    if err != nil {
+        return "", fmt.Errorf("unable to wrap backend: %v", err)
+    }
+
+    mb, err := messageBox.NewMessageBox(common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3"), wrappedClient)
+    if err != nil {
+        return "", fmt.Errorf("Unable to get instance of contract: %v", err)
+    }
+	
+    msg, err := mb.GetSecretMessage(&bind.CallOpts{From: addr}) // Don't forget to pass callOpts!
+    if err != nil {
+        return "", fmt.Errorf("failed to retrieve message: %v", err)
+    }
+	
+    return msg, nil
+}
+```
+
+    :::info Example: Oasis starter in Go
+
+    To see a running example of the Go code including the end-to-end encryption
+    and signed queries check out the official [Oasis starter project for Go].
+
+    :::
+    </TabItem>
+    <TabItem value="Python">
+    Wrap the existing Web3 client by calling the
+    [`wrap()`][wrapped-py] helper and provide the signing logic. Then,
+    all subsequent view calls will be signed. For example:
+
+```python
+from web3 import Web3
+from web3.middleware import construct_sign_and_send_raw_middleware
+from eth_account.signers.local import LocalAccount
+from eth_account import Account
+
+from sapphirepy import sapphire
+
+def get_c10l_message(address: str, network_name: Optional[str] = "sapphire-localnet") -> str:
+    w3 = Web3(Web3.HTTPProvider(sapphire.NETWORKS[network_name]))
+    account: LocalAccount = Account.from_key(os.environ.get("PRIVATE_KEY"))
+    w3.middleware_onion.add(construct_sign_and_send_raw_middleware(account))
+    w3 = sapphire.wrap(w3)
+    
+    compiled_contract = json.load("MessageBox_compiled.json")
+    contract_data = compiled_contract["contracts"]["MessageBox.sol"]["MessageBox"]
+    message_box = w3.eth.contract(address=address, abi=contract_data["abi"])
+    
+    return message_box.functions.message().call()
+```
+
+    :::info Example: Oasis starter in Python
+
+    To see a running example of the Python code including the end-to-end
+    encryption and signed queries, check out the official [Oasis starter project
+    for Python].
+
+    :::
+    </TabItem>
+</Tabs>
+
+[sp-go]: https://github.com/oasisprotocol/sapphire-paratime/tree/main/clients/go
+[sp-py]: https://github.com/oasisprotocol/sapphire-paratime/tree/main/clients/py
+
+[wrapped-go]: https://pkg.go.dev/github.com/oasisprotocol/sapphire-paratime/clients/go#WrapClient
+[wrapped-py]: https://github.com/oasisprotocol/sapphire-paratime/blob/main/clients/py/sapphirepy/sapphire.py#L268
+
+[Oasis starter project for Go]: https://github.com/oasisprotocol/demo-starter-go
+[Oasis starter project for Python]: https://github.com/oasisprotocol/demo-starter-py

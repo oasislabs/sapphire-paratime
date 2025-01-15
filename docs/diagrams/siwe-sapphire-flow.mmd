@@ -1,0 +1,18 @@
+sequenceDiagram
+    autonumber
+    participant C as Client browser
+    participant M as Client wallet<br/>(e.g. MetaMask)
+    participant SC as Smart Contract<br/>is SiweAuth
+
+    C->>C: Visit website, obtain<br/>smart contract address
+    C->>C: Generate Log-in SIWE<br/>message siweMsg
+    C->>M: Request to sign siweMsg
+    M-->>C: Signature sig
+    C->>SC: Login(siweMsg, sig)
+    SC->>SC: Parse and verify<br/>siweMsg, sig
+    SC-->>C: SIWE session token
+    C->>C: Store token to<br/>local store
+    C->>SC: GetSecretMessage(token)
+    SC->>SC: Verify token,<br/>extract message sender
+    SC->>SC: Authorize user,<br/>execute the call
+    SC-->>C: Secret message
