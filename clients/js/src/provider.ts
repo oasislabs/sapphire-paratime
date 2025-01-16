@@ -164,8 +164,7 @@ export async function notifySapphireSnap(
   options: SapphireWrapOptions,
   provider: EIP2696_EthereumProvider,
 ) {
-  const secretKey = (cipher as any).secretKey as Uint8Array | undefined;
-  if (secretKey) {
+  if (cipher.ephemeralKey) {
     const peerPublicKey = await options.fetcher.fetch(provider);
     await provider.request({
       method: 'wallet_invokeSnap',
@@ -175,7 +174,7 @@ export async function notifySapphireSnap(
           method: 'setTransactionDecryptKeys',
           params: {
             id: transactionData,
-            ephemeralSecretKey: hexlify(secretKey),
+            ephemeralSecretKey: hexlify(cipher.ephemeralKey),
             peerPublicKey: hexlify(peerPublicKey.key),
             peerPublicKeyEpoch: peerPublicKey.epoch,
           },
