@@ -85,10 +85,10 @@ export function isWrappedEthereumProvider<P extends EIP2696_EthereumProvider>(
  * @param options (optional) Re-use parameters from other providers
  * @returns Sapphire wrapped provider
  */
-export async function wrapEthereumProvider<P extends EIP2696_EthereumProvider>(
+export function wrapEthereumProvider<P extends EIP2696_EthereumProvider>(
   upstream: P,
-  options?: SapphireWrapConfig,
-): Promise<P> {
+  options?: SapphireWrapOptions,
+): P {
   if (isWrappedEthereumProvider(upstream)) {
     return upstream;
   }
@@ -104,7 +104,7 @@ export async function wrapEthereumProvider<P extends EIP2696_EthereumProvider>(
   // if we do this, don't then re-wrap the send() function
   // only wrap the send() function if there was a request() function
 
-  const request = await makeSapphireRequestFn(upstream, filled_options);
+  const request = makeSapphireRequestFn(upstream, filled_options);
   const hooks: Record<string, unknown> = { request };
 
   // We prefer a request() method, but a provider may expose a send() method
@@ -208,21 +208,20 @@ export function isCallDataPublicKeyQuery(params?: object | readonly unknown[]) {
  * @param options
  * @returns
  */
-export async function makeSapphireRequestFn(
+export function makeSapphireRequestFn(
   provider: EIP2696_EthereumProvider,
   options?: SapphireWrapOptions,
-): Promise<EIP2696_EthereumProvider['request']> {
+): EIP2696_EthereumProvider['request'] {
   if (isWrappedRequestFn(provider.request)) {
     return provider.request;
   }
 
   const filled_options = fillOptions(options);
 
-  const snapId = filled_options.enableSapphireSnap
-    ? await detectSapphireSnap(provider)
-    : undefined;
-
   const f = async (args: EIP1193_RequestArguments) => {
+    const snapId = filled_options.enableSapphireSnap
+      ? await detectSapphireSnap(provider)
+      : undefined;
     const cipher = await filled_options.fetcher.cipher(provider);
     const { method, params } = args;
 
