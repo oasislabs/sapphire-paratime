@@ -16,13 +16,16 @@ import type {
 	EIP1193_RequestArguments,
 	EIP1193_RequestFn,
 	EIP2696_EthereumProvider,
+	SapphireWrapConfig,
 	SapphireWrapOptions,
 } from "@oasisprotocol/sapphire-paratime";
 
 import {
+	detectSapphireSnap,
 	fillOptions,
 	isCalldataEnveloped,
 	makeTaggedProxyObject,
+	notifySapphireSnap,
 } from "@oasisprotocol/sapphire-paratime";
 
 export { NETWORKS } from "@oasisprotocol/sapphire-paratime";
@@ -89,11 +92,25 @@ export class SignerHasNoProviderError extends Error {}
 
 function hookEthersSend<
 	C extends Signer["sendTransaction"] | Signer["signTransaction"],
->(send: C, options: SapphireWrapOptions, request: EIP1193_RequestFn): C {
+>(
+	send: C,
+	options: SapphireWrapOptions,
+	request: EIP1193_RequestFn,
+	provider: EIP2696_EthereumProvider | undefined,
+): C {
 	return (async (tx: TransactionRequest) => {
 		if (tx.data) {
 			const cipher = await options.fetcher.cipher({ request });
 			tx.data = hexlify(cipher.encryptCall(tx.data));
+			if (provider) {
+				const snapId = options.enableSapphireSnap
+					? await detectSapphireSnap(provider)
+					: undefined;
+
+				if (snapId !== undefined && tx.data !== undefined) {
+					notifySapphireSnap(snapId, cipher, tx.data, options, provider);
+				}
+			}
 		}
 		return send(tx);
 	}) as C;
@@ -101,7 +118,7 @@ function hookEthersSend<
 
 export function wrapEthersSigner<P extends Signer>(
 	upstream: P,
-	options?: SapphireWrapOptions,
+	options?: SapphireWrapConfig,
 ): P & EIP2696_EthereumProvider {
 	if (isWrappedSigner(upstream)) {
 		return upstream;
@@ -110,8 +127,9 @@ export function wrapEthersSigner<P extends Signer>(
 	const filled_options = fillOptions(options);
 
 	let signer: Signer;
+	let provider: (Provider & EIP2696_EthereumProvider) | undefined;
 	if (upstream.provider) {
-		const provider = wrapEthersProvider(upstream.provider, filled_options);
+		provider = wrapEthersProvider(upstream.provider, filled_options);
 		try {
 			signer = upstream.connect(provider);
 		} catch (e: unknown) {
@@ -139,11 +157,13 @@ export function wrapEthersSigner<P extends Signer>(
 				signer.sendTransaction.bind(signer),
 				filled_options,
 				request,
+				provider,
 			),
 			signTransaction: hookEthersSend(
 				signer.signTransaction.bind(signer),
 				filled_options,
 				request,
+				provider,
 			),
 			call: hookEthersCall(signer, "call", filled_options, request),
 			estimateGas: hookEthersCall(
@@ -175,7 +195,7 @@ export class ContractRunnerHasNoProviderError extends Error {}
 
 export function wrapEthersProvider<P extends Provider>(
 	provider: P,
-	options?: SapphireWrapOptions,
+	options?: SapphireWrapConfig,
 ): P & EIP2696_EthereumProvider {
 	// Already wrapped, so don't wrap it again.
 	if (isWrappedProvider(provider)) {

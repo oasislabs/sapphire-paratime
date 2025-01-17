@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { BytesLike } from './ethersutils.js';
+import { BytesLike, hexlify } from './ethersutils.js';
 import { KeyFetcher } from './calldatapublickey.js';
 import { SUBCALL_ADDR, CALLDATAPUBLICKEY_CALLDATA } from './constants.js';
+import { Cipher } from './cipher.js';
 
 // -----------------------------------------------------------------------------
 // https://eips.ethereum.org/EIPS/eip-2696#interface
@@ -43,18 +44,22 @@ export function isLegacyProvider<T extends object>(
 
 export interface SapphireWrapOptions {
   fetcher: KeyFetcher;
+  enableSapphireSnap?: boolean;
 }
 
-export function fillOptions(
-  options: SapphireWrapOptions | undefined,
-): SapphireWrapOptions {
+export interface SapphireWrapConfig
+  extends Omit<SapphireWrapOptions, 'fetcher'> {
+  fetcher?: KeyFetcher;
+}
+
+export function fillOptions(options: SapphireWrapConfig | undefined) {
   if (!options) {
     options = {} as SapphireWrapOptions;
   }
   if (!options.fetcher) {
     options.fetcher = new KeyFetcher();
   }
-  return options;
+  return options as SapphireWrapOptions;
 }
 
 // -----------------------------------------------------------------------------
@@ -124,6 +129,61 @@ export function wrapEthereumProvider<P extends EIP2696_EthereumProvider>(
   );
 }
 
+// -----------------------------------------------------------------------------
+// Interact with the Sapphire MetaMask Snap to provide transaction insights
+// This sends the encryption key on a per-transaction basis
+
+interface SnapInfoT {
+  version: string;
+  id: string;
+  enabled: boolean;
+  blocked: boolean;
+}
+
+const SAPPHIRE_SNAP_PNPM_ID = 'npm:@oasisprotocol/sapphire-snap';
+
+export async function detectSapphireSnap(provider: EIP2696_EthereumProvider) {
+  try {
+    const installedSnaps = (await provider.request({
+      method: 'wallet_getSnaps',
+    })) as Record<string, SnapInfoT>;
+    for (const snap of Object.values(installedSnaps)) {
+      if (snap.id === SAPPHIRE_SNAP_PNPM_ID) {
+        return snap.id;
+      }
+    }
+  } catch (e: any) {
+    return undefined;
+  }
+}
+
+export async function notifySapphireSnap(
+  snapId: string,
+  cipher: Cipher,
+  transactionData: BytesLike,
+  options: SapphireWrapOptions,
+  provider: EIP2696_EthereumProvider,
+) {
+  if (cipher.ephemeralKey) {
+    const peerPublicKey = await options.fetcher.fetch(provider);
+    await provider.request({
+      method: 'wallet_invokeSnap',
+      params: {
+        snapId: snapId,
+        request: {
+          method: 'setTransactionDecryptKeys',
+          params: {
+            id: transactionData,
+            ephemeralSecretKey: hexlify(cipher.ephemeralKey),
+            peerPublicKey: hexlify(peerPublicKey.key),
+            peerPublicKeyEpoch: peerPublicKey.epoch,
+          },
+        },
+      },
+    });
+  }
+}
+
 const SAPPHIRE_EIP1193_REQUESTFN = '#SAPPHIRE_EIP1193_REQUESTFN' as const;
 
 export function isWrappedRequestFn<
@@ -159,9 +219,13 @@ export function makeSapphireRequestFn(
   const filled_options = fillOptions(options);
 
   const f = async (args: EIP1193_RequestArguments) => {
+    const snapId = filled_options.enableSapphireSnap
+      ? await detectSapphireSnap(provider)
+      : undefined;
     const cipher = await filled_options.fetcher.cipher(provider);
     const { method, params } = args;
 
+    let transactionData: BytesLike | undefined = undefined;
     // Encrypt requests which can be encrypted
     if (
       params &&
@@ -169,13 +233,24 @@ export function makeSapphireRequestFn(
       /^eth_((send|sign)Transaction|call|estimateGas)$/.test(method) &&
       params[0].data // Ignore balance transfers without calldata
     ) {
-      params[0].data = cipher.encryptCall(params[0].data);
+      transactionData = params[0].data = cipher.encryptCall(params[0].data);
     }
 
     const res = await provider.request({
       method,
       params: params ?? [],
     });
+
+    if (snapId !== undefined && transactionData !== undefined) {
+      // Run in background so as to not delay results
+      notifySapphireSnap(
+        snapId,
+        cipher,
+        transactionData,
+        filled_options,
+        provider,
+      );
+    }
 
     // Decrypt responses which return encrypted data
     if (method === 'eth_call') {

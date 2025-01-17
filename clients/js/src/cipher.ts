@@ -80,6 +80,7 @@ function formatFailure(fail: CallFailure): string {
 export abstract class Cipher {
   public abstract kind: CipherKind;
   public abstract publicKey: Uint8Array;
+  public abstract ephemeralKey: Uint8Array;
   public abstract epoch?: number;
 
   public abstract encrypt(
@@ -213,10 +214,11 @@ export abstract class Cipher {
 export class X25519DeoxysII extends Cipher {
   public override readonly kind = CipherKind.X25519DeoxysII;
   public override readonly publicKey: Uint8Array;
+  public override readonly ephemeralKey: Uint8Array;
   public override readonly epoch: number | undefined;
 
   private cipher: deoxysii.AEAD;
-  private key: Uint8Array; // Stored for curious users.
+  public secretKey: Uint8Array; // Stored for curious users.
 
   /** Creates a new cipher using an ephemeral keypair stored in memory. */
   static ephemeral(peerPublicKey: BytesLike, epoch?: number): X25519DeoxysII {
@@ -243,6 +245,7 @@ export class X25519DeoxysII extends Cipher {
     super();
 
     this.publicKey = keypair.publicKey;
+    this.ephemeralKey = keypair.secretKey;
     this.epoch = epoch;
 
     // Derive a shared secret using X25519 (followed by hashing to remove ECDH bias).
@@ -254,8 +257,8 @@ export class X25519DeoxysII extends Cipher {
       .update(naclScalarMult(keypair.secretKey, peerPublicKey))
       .digest().buffer;
 
-    this.key = new Uint8Array(keyBytes);
-    this.cipher = new deoxysii.AEAD(new Uint8Array(this.key)); // deoxysii owns the input
+    this.secretKey = new Uint8Array(keyBytes);
+    this.cipher = new deoxysii.AEAD(new Uint8Array(this.secretKey)); // deoxysii owns the input
   }
 
   public encrypt(
